@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>SoundShapes</title>
+      <meta charset="utf-8">
+        <link rel="stylesheet" href="https://code.jquery.com/ui/1.11.4/themes/smoothness/jquery-ui.css">
+        <script src="https://code.jquery.com/jquery-1.10.2.js"></script>
+        <script src="https://code.jquery.com/ui/1.11.4/jquery-ui.js"></script>
+        <script type="text/javascript" src="adapter.js"></script>
+        <script type="text/javascript" src="sinewave.js"></script>
+        <script type="text/javascript" src="SoundShape.js"></script>
+        <link rel="stylesheet" href="ss.css">
+        <script>
+                
+            
+            var myMotionType = {
+                STATIC: 0,
+                LINEAR: 1,
+                GRAVITY: 2
+            };
+            this.gestureTriggerType = {
+                POP: 0,
+                HIT: 1,
+                HITONOFF: 2,
+                HOLD: 3
+            };
+        
+            var theCanvas;
+            var oContext;
+            var output;
+            var localVideo;
+            var soundShapes = [];
+            var collectOldDataCount = 2;
+            var oldData = {'data':[]};
+            var frameCount = 0;
+            var numShapes = 4;
+            var drawDots = false;
+            var dragging = false;
+            var useMotionType = myMotionType.STATIC;
+            var useGestureTrrigerType = gestureTriggerType.POP;
+            var useChangeTime = 1000;
+            window.onload = init;
+            
+            function init() {
+                theCanvas = document.getElementById("output");
+                theCanvas.addEventListener("mousedown", mouseDownListener, false);
+                
+                
+                output = document.querySelector('#output');
+                
+                localVideo = document.querySelector('#localVideo');
+                oContext = output.getContext('2d');
+        
+                var localStream;
+                    
+                window.requestAnimFrame = (function(callback) {
+                    return window.requestAnimationFrame ||
+                        window.webkitRequestAnimationFrame ||
+                        window.mozRequestAnimationFrame ||
+                        windowoRequestAnimationFrame ||
+                        window.msRequestAnimationFrame ||
+                        function(callback) { window.setTimeout(callback, 1000 / 60);};
+                })();
+                                                
+                var actxCall = window.webkitAudioContext || window.AudioContext;
+                aContext = new actxCall();
+                
+                $( "#velocity_slider").hide();
+                $( "#gravity_slider").hide();
+                $( "#velocity").hide();
+                $( "#gravity" ).hide();
+                animate(localVideo,oContext);
+            }
+            
+            startMedia();
+            
+            function startMedia() {
+                var constraints = {video: true, audio: true};
+                getUserMedia(constraints, handleUserMedia, handleUserMediaError);
+                console.log('Getting user media with constraints', constraints);
+            }
+            
+            function handleUserMedia(stream) {
+                console.log('Adding local stream.');
+                if (localVideo == null) {
+                    localVideo = document.querySelector('#localVideo');
+                }
+                attachMediaStream(localVideo, stream);
+                localStream = stream;
+            }
+            function createSoundShapes() {
+                var origX = 30;
+                var origY = 30;
+                var sRad = 30;
+                numShapes = $( "#numShapes_slider" ).slider( "value" );
+                baseTone = $( "#baseTone_slider" ).slider( "value" );
+                var circleSpacing = (output.width/numShapes)/2.0;
+             
+                for(var i=0; i<numShapes; i++) {
+                    var x = origX + ((i+1)*sRad) + ((i+1)*circleSpacing);
+                    var y = origY - sRad;
+                    aSoundShape = new SoundShape(i,oContext, aContext, {'x':x, 'y':y},baseTone, sRad,numShapes);
+                    aSoundShape.setAmplitude(0.1);
+                    aSoundShape.myMotionType = useMotionType;
+                    aSoundShape.myGestureTriggerType = useGestureTrrigerType;
+                    aSoundShape.setActionDuration(useChangeTime);
+                    aSoundShape.setRandomizeRestartTime(false);
+                    switch(useMotionType) {
+                        case myMotionType.STATIC:
+                            aSoundShape.setRandomizeXPos(true);
+                            aSoundShape.setRandomizeYPos(true);
+                            //set defaults then reset randomize positions to false
+                            aSoundShape.setDefaults((new Date()).getTime());
+                            aSoundShape.setRandomizeXPos(false);
+                            aSoundShape.setRandomizeYPos(false);
+
+                        break;
+                        case myMotionType.LINEAR:
+                            aSoundShape.setRandomizeXPos(false);
+                            aSoundShape.setRandomizeYPos(false);
+                            aSoundShape.setYVelocity($( "#velocity_slider" ).slider("value"));
+                            aSoundShape.setDefaults((new Date()).getTime());
+                        break;
+                        case myMotionType.GRAVITY:
+                            aSoundShape.setRandomizeXPos(false);
+                            aSoundShape.setRandomizeYPos(false);
+                            aSoundShape.setGravity($( "#gravity_slider").slider("value"));
+                            aSoundShape.setDefaults((new Date()).getTime());
+                        break;
+                    }
+                    //add sound shape to list
+                    soundShapes.push(aSoundShape);
+                }
+                console.log("Made soundShapes: and this: ",soundShapes.length, $( "#velocity_slider").slider("value"),useMotionType);
+            }
+            //removes soundShapes
+            function destroySoundShapes() {
+                
+                for(var i=0; i<soundShapes.length; i++) {
+                    if(soundShapes[i].playing) {
+                        soundShapes[i].PauseTone(soundShapes[i]);
+                    }
+                }
+                for(var i=0; i<=numShapes; i++) {
+                    soundShapes.pop();
+                }
+            }
+        
+            function animate(video,context) {
+                if (output.width != localVideo.clientWidth) {
+                    output.width = localVideo.clientWidth;
+                    output.height = localVideo.clientHeight;
+                    output.style.width = localVideo.clientWidth +'px';
+                    output.style.height = localVideo.clientHeight + 'px';
+                }
+                //flip video
+                var tmpCanvas = document.getElementById("output");
+                var tmpContext = tmpCanvas.getContext('2d');
+                tmpContext.save();
+                tmpContext.translate(output.width/2, output.height/2);
+                tmpContext.scale(-1,1);
+                tmpContext.translate(-output.width/2, -output.height/2);
+                tmpContext.drawImage(video,0,0,output.width,output.height);
+                tmpContext.restore();
+                
+                var imgData = tmpContext.getImageData(0, 0, output.width,output.height);
+             
+             if(frameCount % collectOldDataCount == 0) {
+                 oldData = tmpContext.getImageData(0, 0, output.width,output.height);
+                 //console.log("Got old data!",frameCount);
+             }
+
+                if(drawDots) {
+                    for(var i=0; i<soundShapes.length; i++) {
+                        var time = (new Date()).getTime() - soundShapes[i].startTime;
+                        soundShapes[i].updateSoundShape(imgData,oldData,time);
+                    }
+                }
+                
+                
+                requestAnimFrame(function() { animate(video, tmpContext); });
+                frameCount++;
+            }
+        
+            function handleUserMediaError(error){
+                console.log('navigator.getUserMedia error: ', error);
+            }
+            //mouse shite
+            function mouseDownListener(evt) {
+                var bRect = theCanvas.getBoundingClientRect();
+                mouseX = (evt.clientX - bRect.left)*(theCanvas.width/bRect.width);
+                mouseY = (evt.clientY - bRect.top)*(theCanvas.height/bRect.height);
+				
+                //find which shape was clicked
+                for (var i=0; i < soundShapes.length; i++) {
+                    if	(hitTest(soundShapes[i], mouseX, mouseY)) {
+                        dragging = true;
+                        dragHoldX = mouseX - soundShapes[i].center.x;
+                        dragHoldY = mouseY - soundShapes[i].center.y;
+                        dragIndex = i;
+                    }
+                }
+                
+                if (dragging) {
+                    window.addEventListener("mousemove", mouseMoveListener, false);
+                }
+                theCanvas.removeEventListener("mousedown", mouseDownListener, false);
+                window.addEventListener("mouseup", mouseUpListener, false);
+                
+                //code below prevents the mouse down from having an effect on the main browser window:
+                if (evt.preventDefault) {
+                    evt.preventDefault();
+                } //standard
+                else if (evt.returnValue) {
+                    evt.returnValue = false;
+                } //older IE
+                return false;
+            }
+        
+        function mouseUpListener(evt) {
+            theCanvas.addEventListener("mousedown", mouseDownListener, false);
+            window.removeEventListener("mouseup", mouseUpListener, false);
+            if (dragging) {
+                dragging = false;
+                window.removeEventListener("mousemove", mouseMoveListener, false);
+            }
+        }
+        
+        function mouseMoveListener(evt) {
+            var posX;
+            var posY;
+            var shapeRad = soundShapes[dragIndex].radius;
+            var minX = shapeRad;
+            var maxX = theCanvas.width - shapeRad;
+            var minY = shapeRad;
+            var maxY = theCanvas.height - shapeRad;
+            //getting mouse position correctly
+            var bRect = theCanvas.getBoundingClientRect();
+            mouseX = (evt.clientX - bRect.left)*(theCanvas.width/bRect.width);
+            mouseY = (evt.clientY - bRect.top)*(theCanvas.height/bRect.height);
+            
+            //clamp x and y positions to prevent object from dragging outside of canvas
+            posX = mouseX - dragHoldX;
+            posX = (posX < minX) ? minX : ((posX > maxX) ? maxX : posX);
+            posY = mouseY - dragHoldY;
+            posY = (posY < minY) ? minY : ((posY > maxY) ? maxY : posY);
+            
+            soundShapes[dragIndex].center.x = posX;
+            soundShapes[dragIndex].center.y = posY;
+            soundShapes[dragIndex].originX = posX;
+            soundShapes[dragIndex].originY = posY;
+            
+            soundShapes[dragIndex].drawCircle();
+        }
+        
+        function hitTest(shape,mx,my) {
+            
+            var dx;
+            var dy;
+            dx = mx - shape.center.x;
+            dy = my - shape.center.y;
+            
+            //a "hit" will be registered if the distance away from the center is less than the radius of the circular object		
+            return (dx*dx + dy*dy < shape.radius*shape.radius);
+        }
+            //ui event callbacks
+            function setDrawDots() {
+                if(!drawDots) {
+                    createSoundShapes();
+                    drawDots = true;
+                } else {
+                    destroySoundShapes();
+                    drawDots = false;
+                }
+            }
+            function setMotionType(mType) {
+                if(mType == 0) {
+                    //hide all sliders
+                    $( "#velocity_slider").hide();
+                    $( "#gravity_slider").hide();
+                    $( "#velocity").hide();
+                    $( "#gravity" ).hide();
+                    //set ui motion type
+                    useMotionType = myMotionType.STATIC;
+                    //set ss motion type
+                    for(var i=0; i<soundShapes.length; i++) {
+                        soundShapes[i].setMotionType = useMotionType;
+                    }
+                }
+                if(mType == 1) {
+                 //switch out sliders
+                    $( "#velocity_slider").show();
+                    $( "#gravity_slider").hide();
+                    $( "#velocity").show();
+                    $( "#gravity" ).hide();
+                    useMotionType = myMotionType.LINEAR;
+                        
+                    for(var i=0; i<soundShapes.length; i++) {
+                        soundShapes[i].setMotionType = useMotionType;
+                    }
+                }
+                
+                if(mType == 2) {
+                    $( "#velocity_slider").hide();
+                    $( "#gravity_slider").show();
+                    $( "#velocity").hide();
+                    $( "#gravity" ).show();
+                    useMotionType = myMotionType.GRAVITY;
+                    
+                    for(var i=0; i<soundShapes.length; i++) {
+                        soundShapes[i].setMotionType = useMotionType;
+                    }
+                }
+            }
+        
+            function setGestureType(gType) {
+                if(gType == 0) {
+                    $( "#actionDuration_slider").show();
+                    $( "#gestureTol_slider").show();
+                    
+                    useGestureTrrigerType = gestureTriggerType.POP;
+                    //set ss gestureTriggerType type
+                    for(var i=0; i<soundShapes.length; i++) {
+                        soundShapes[i].setMotionType = useGestureTrrigerType;
+                    }
+                }
+                if(gType == 1) {
+                    $( "#actionDuration_slider").show();
+                    $( "#gestureTol_slider").show();
+                    
+                    useGestureTrrigerType = gestureTriggerType.HIT;
+                    //set ss gestureTriggerType type
+                    for(var i=0; i<soundShapes.length; i++) {
+                        soundShapes[i].setMotionType = useGestureTrrigerType;
+                    }
+                    console.log("Set gesture type to hit!");
+                }
+                if(gType == 2) {
+                    $( "#actionDuration_slider").hide();
+                    $( "#gestureTol_slider").show();
+                    
+                    useGestureTrrigerType = gestureTriggerType.HITONOFF;
+                    //set ss gestureTriggerType type
+                    for(var i=0; i<soundShapes.length; i++) {
+                        soundShapes[i].setMotionType = useGestureTrrigerType;
+                    }
+                }
+                if(gType == 3) {
+                    //hide all sliders
+                    $( "#actionDuration_slider").hide();
+                    $( "#gestureTol_slider").show();
+                    
+                    useGestureTrrigerType = gestureTriggerType.HOLD;
+                    //set ss gestureTriggerType type
+                    for(var i=0; i<soundShapes.length; i++) {
+                        soundShapes[i].setMotionType = useGestureTrrigerType;
+                    }
+                }
+            }
+
+
+            function changeYVelocity(vel) {
+                for(var i=0; i<soundShapes.length; i++) {
+                    soundShapes[i].setYVelocity(vel);
+                }
+            }
+        
+            function changeGravity(gr) {
+                for(var i=0; i<soundShapes.length; i++) {
+                    soundShapes[i].setGravity(gr);
+                }
+            }
+
+            function changeRootTone(tone) {
+                for(var i=0; i<soundShapes.length; i++) {
+                    soundShapes[i].setTone(tone);
+                }
+            }
+        
+            function changeActionDuration(dur) {
+                useChangeTime = dur*1000;
+                for(var i=0; i<soundShapes.length; i++) {
+                    soundShapes[i].setActionDuration(useChangeTime);
+                }
+            }
+
+            function changeGestureTol(tol) {
+                for(var i=0; i<soundShapes.length; i++) {
+                    soundShapes[i].setGestureTol(tol*250);
+                }
+            }
+
+            function setRandomizeXPos() {
+                for(var i=0; i<soundShapes.length; i++) {
+                    soundShapes[i].randomizeXStartPos ?
+                    soundShapes[i].setRandomizeXPos(false):
+                    soundShapes[i].setRandomizeXPos(true);
+                }
+            }
+        
+            function setRandomizeYPos() {
+                for(var i=0; i<soundShapes.length; i++) {
+                    soundShapes[i].randomizeYStartPos ?
+                    soundShapes[i].setRandomizeYPos(false):
+                    soundShapes[i].setRandomizeYPos(true);
+                }
+            }
+
+            function setRandomizeYVel() {
+                for(var i=0; i<soundShapes.length; i++) {
+                    soundShapes[i].setYVelocity(soundShapes[i].yVelocity*(Math.random()*2.0));
+                }
+            }
+        
+            function setRandomizeGravity() {
+                for(var i=0; i<soundShapes.length; i++) {
+                    soundShapes[i].setGravity(soundShapes[i].gravity*(Math.random()*2.0));
+                }
+            }
+
+            function setRandomizeRestartTime() {
+                for(var i=0; i<soundShapes.length; i++) {
+                    soundShapes[i].randomizeRestartTime ?
+                    soundShapes[i].setRandomizeRestartTime(false):
+                    soundShapes[i].setRandomizeRestartTime(true);
+                }
+            }
+        </script>
+        <script>
+            //stop/start button
+            $(function() {
+              $("#StartStop").button().click(function( event ) { setDrawDots(); })
+            });
+            //randomize xpos toggle
+            $(function() {
+              $("#randXPos").button().click(function( event ) { setRandomizeXPos(); })
+            });
+            //randomize ypos toggle
+            $(function() {
+              $("#randYPos").button().click(function( event ) { setRandomizeYPos(); })
+            });
+            //randomize yvel toggle
+            $(function() {
+              $("#randYVel").button().click(function( event) { setRandomizeYVel(); })
+            });
+            //randomize yaccel toggle
+            $(function() {
+              $("#randYAccel").button().click(function( event ) { setRandomizeGravity(); })
+            });
+            //randomize restart time
+            $(function() {
+              $("#randSTime").button().click(function( event ) { setRandomizeRestartTime(); })
+            });
+
+            //motion type selection
+            $(function() {
+              $("#motionType").selectmenu({change:function(event,data){setMotionType(data.item.value);}});
+            });
+            //gesture type selection
+            $(function() {
+              $("#gestureType").selectmenu({change:function(event,data){setGestureType(data.item.value);}});
+            });
+            //velocity slider
+            $(function() {
+              $( "#velocity_slider" ).slider({
+                range: false,
+                min: 0.1,
+                max: 10.0,
+                step: 0.1,
+                value: 0.5,
+                slide: function( event, ui ) {
+                $( "#velocity" ).val( ui.value );
+                changeYVelocity(ui.value);
+                }
+              });
+              $( "#velocity" ).val( $( "#velocity_slider" ).slider( "value" ) );
+            });
+            //Gravity slider
+            $(function() {
+              $( "#gravity_slider" ).slider({
+                    range: false,
+                    min: 5.0,
+                    max: 500.0,
+                    step: 5.0,
+                    value: 25,
+                    slide: function( event, ui ) {
+                    $( "#gravity" ).val( ui.value );
+                    changeGravity(ui.value);
+                    }
+                });
+                $( "#gravity" ).val( $( "#gravity_slider" ).slider( "value" ) );
+              });
+              //num sound shapes slider
+              //Gravity slider
+            $(function() {
+              $( "#numShapes_slider" ).slider({
+                range: false,
+                min: 1,
+                max: 16,
+                step: 1,
+                value: 3,
+                slide: function( event, ui ) {
+                $( "#numShapes" ).val( ui.value );
+                changeGravity(ui.value);
+                }
+              });
+              $( "#numShapes" ).val( $( "#numShapes_slider" ).slider( "value" ) );
+            });
+            $(function() {
+              $( "#baseTone_slider" ).slider({
+                range: false,
+                min: 20,
+                max: 880,
+                step: 1,
+                value: 440,
+                slide: function( event, ui ) {
+                $( "#baseTone" ).val( ui.value );
+                    changeRootTone(ui.value);
+                }
+              });
+              $( "#baseTone" ).val( $( "#baseTone_slider" ).slider( "value" ) );
+            });
+            $(function() {
+              $( "#actionDuration_slider" ).slider({
+                    range: false,
+                    min: 0.1,
+                    max: 10.0,
+                    step: 0.1,
+                    value: 1.0,
+                    slide: function( event, ui ) {
+                    $( "#actionDuration" ).val( ui.value );
+                        changeActionDuration(ui.value);
+                    }
+                    });
+                $( "#actionDuration" ).val( $( "#actionDuration_slider" ).slider( "value" ) );
+              });
+              $(function() {
+                $( "#gestureTol_slider" ).slider({
+                        range: false,
+                        min: 1.0,
+                        max: 10.0,
+                        step: 1.0,
+                        value: 1.0,
+                        slide: function( event, ui ) {
+                        $( "#gestureTol" ).val( ui.value );
+                            changeGestureTol(ui.value);
+                          }
+                        });
+                    $( "#gestureTol" ).val( $( "#gestureTol_slider" ).slider( "value" ) );
+                });
+
+        </script>
+    </head>
+<body bgcolor="black">
+    <hr>
+    <div align=center><font style="color:#d3af00; font-size: 32px;">SoundShapes</font></div>
+    <hr>
+    
+    <div align=center><font style="color:#d3af00; font-size: 16px;">Press the "Allow" button to access your webcam and push "Start" to begin.</font></div>
+    <div align=center><font style="color:#d3af00; font-size: 16px;">Touch circles to make sounds. Adjust circle positions with your mouse.</font></div>
+
+    <table cellspacing=50>
+        <td align = center>
+            <input type="checkbox" id="StartStop"><label for="StartStop">Start/Stop</label>
+            <style> label { display: block; margin: 20px 0 0 0;} select { width: 200px;} </style>
+            <form action="#">
+                <label for="motionType" style="color:#d3af00; font-size: 13px;">Motion Type:</label>
+                <select name="motionType" id="motionType">
+                    <option value="0" selected>Static</option>
+                    <option value="1">Linear</option>
+                    <option value="2">Gravity</option>
+                </select>
+            </form>
+            <input type="text" id="velocity" readonly style="border:0; color:#f6931f; font-weight:bold; background-color:#000000;">
+            <div id="velocity_slider"></div>
+            <input type="text" id="gravity" readonly style="border:0; color:#f6931f; font-weight:bold; background-color:#000000;">
+            <div id="gravity_slider"></div>
+            <form action="#">
+                <label for="gestureType" style="color:#d3af00; font-size: 13px;">Gesture Type:</label>
+                <select name="gestureType" id="gestureType">
+                    <option value="0" selected>POP</option>
+                    <option value="1">HIT</option>
+                    <option value="2">HIT ON/OFF</option>
+                    <option value="2">HOLD</option>
+                </select>
+            </form>
+           
+           <label for="numShapes" style="color:#d3af00; font-size: 13px;">Number of SoundShapes:</label>
+           <input type="text" id="numShapes" readonly style="border:0; color:#f6931f; font-weight:bold; background-color:#000000;">
+               <div id="numShapes_slider"></div>
+            <label for="baseTone" style="color:#d3af00; font-size: 13px;">BaseTone:</label>
+            <input type="text" id="baseTone" readonly style="border:0; color:#f6931f; font-weight:bold; background-color:#000000;">
+                <div id="baseTone_slider"></div>
+            <label for="actionDuration" style="color:#d3af00; font-size: 13px;">Note Duration:</label>
+            <input type="text" id="actionDuration" readonly style="border:0; color:#f6931f; font-weight:bold; background-color:#000000;">
+                <div id="actionDuration_slider"></div>
+            <label for="gestureTol" style="color:#d3af00; font-size: 13px;">Sensitivity:</label>
+            <input type="text" id="gestureTol" readonly style="border:0; color:#f6931f; font-weight:bold; background-color:#000000;">
+                <div id="gestureTol_slider"></div>
+        </td>
+        <td align = center>
+            <canvas id='output'></canvas>
+        </td>
+
+    </table>
+    <video id='localVideo' muted  autoplay style='visibility:hidden'></video>
+</body>
+</html>
